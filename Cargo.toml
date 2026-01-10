@@ -1,5 +1,6 @@
 [workspace]
 members = [
-    "crates/ctunnel-core"
+    "crates/ctunnel-core",
+    "crates/ctunnel-crypto-sodium",
 ]
 resolver = "2"

@@ -1,0 +1,14 @@
+[package]
+name = "ctunnel-crypto-sodium"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+ctunnel-core = { path = "../ctunnel-core" }
+libsodium-sys-stable = "1.23.0" 
+once_cell = "1" # clean one-time initialization guard.
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
