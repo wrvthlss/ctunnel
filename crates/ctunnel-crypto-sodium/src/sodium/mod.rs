@@ -7,7 +7,7 @@ use libsodium_sys::sodium_init;
 /// Ensure libsodium is initialized exactly once.
 static SODIUM_INIT: Lazy<()> = Lazy::new(|| {
     // Safe wrapper around unsafe ffi call.
-    // If initialization fails, we panic: crypto backend cannot operate.
+    // If initialization fails, panic: crypto backend cannot operate.
     safe::sodium_init().expect("libsodium initialization failed");
 });
 
