@@ -63,3 +63,29 @@ async fn aead_encrypt_decrypt_round_trip_and_tamper() {
     // tamper aad
     assert!(p.aead_decrypt(&key, &nonce, b"HEADER", &c).await.is_err());
 }
+
+#[tokio::test]
+async fn x25519_shared_secret_matches_on_both_sides() {
+    let p = SodiumCryptoProvider::new();
+
+    // Alice generates keypair
+    let alice = p.x25519_generate().await.unwrap();
+
+    // Bob generates keypair
+    let bob = p.x25519_generate().await.unwrap();
+
+    // Alice computes shared secret
+    let alice_shared = p
+        .x25519_shared_secret(&alice.secret, &bob.public)
+        .await
+        .unwrap();
+
+    // Bob computes shared secret
+    let bob_shared = p
+        .x25519_shared_secret(&bob.secret, &alice.public)
+        .await
+        .unwrap();
+
+    // They must match
+    assert_eq!(alice_shared.0, bob_shared.0);
+}

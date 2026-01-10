@@ -1,7 +1,5 @@
-//! Unsafe FFI calls into libsodium.
-//!
-//! Policy: This is the only module allowed to use `unsafe` in this crate.
-
+// Unsafe FFI calls into libsodium.
+//   - This is the only module allowed to use `unsafe` in this crate.
 use libsodium_sys as sodium;
 use std::os::raw::{c_int, c_uchar, c_ulonglong};
 
@@ -47,7 +45,15 @@ pub(crate) fn ed25519_verify_detached(
 
 // --- X25519 scalar mult (shared secret) ---
 pub(crate) fn x25519_scalarmult(shared: *mut c_uchar, sk: *const c_uchar, pk: *const c_uchar) -> c_int {
-    unsafe { sodium::crypto_scalarmult(shared as *mut _, sk as *const _, pk as *const _) }
+    unsafe {
+        sodium::crypto_scalarmult(shared as *mut _, sk as *const _, pk as *const _)
+    }
+}
+
+pub(crate) fn x25519_scalarmult_base(pk: *mut c_uchar, sk: *const c_uchar) -> c_int {
+    unsafe {
+        sodium::crypto_scalarmult_base(pk as *mut _, sk as *const _)
+    }
 }
 
 // --- Generic hash (BLAKE2b) ---

@@ -62,10 +62,25 @@ pub(crate) fn ed25519_verify(public: &[u8; 32], msg: &[u8], sig: &Signature64) -
 
 // --- X25519 ---
 //  - MVP will generate secrets via randombytes and derive the public using scalarmult_base later.
-
 pub(crate) fn x25519_generate() -> Result<X25519Keypair, CryptoError> {
-    Err(CryptoError::InvalidKey)
+    // Generate a random 32-byte secret.
+    let mut sk = [0u8; 32];
+    ffi::randombytes_buf(sk.as_mut_ptr(), sk.len());
+
+    // Derive the public key from the secret scalar.
+    let mut pk = [0u8; 32];
+    let rc = ffi::x25519_scalarmult_base(pk.as_mut_ptr(), sk.as_ptr());
+
+    if rc != 0 {
+        return Err(CryptoError::InvalidKey);
+    }
+
+    Ok(X25519Keypair {
+        public: pk,
+        secret: sk,
+    })
 }
+
 
 pub(crate) fn x25519_shared_secret(my_secret: &[u8; 32], peer_public: &[u8; 32]) -> Result<SharedSecret32, CryptoError> {
     let mut shared = [0u8; 32];
