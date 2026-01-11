@@ -6,7 +6,7 @@ pub const MSG_CLIENT_HELLO: u8 = 0x01;
 pub const MSG_SERVER_HELLO: u8 = 0x02;
 pub const MSG_CLIENT_FINISH: u8 = 0x03;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Ed25519PublicKey(pub [u8; 32]);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
