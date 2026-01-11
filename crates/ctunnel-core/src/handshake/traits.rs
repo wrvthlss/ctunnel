@@ -14,6 +14,9 @@ pub enum HandshakeAction {
     // Handshake complete; session established.
     Established(EstablishedSession),
 
+    // Send a message and also consider the handshake established.
+    SendAndEstablished { msg: HandshakeMessage, session: EstablishedSession },
+
     // Fatal handshake failure.
     Fail(HandshakeError),
 }

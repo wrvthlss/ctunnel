@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::mem;
 use async_trait::async_trait;
 
 
@@ -64,45 +65,100 @@ impl HandshakeMachine for ServerHandshake {
     }
 
     async fn on_message(&mut self, msg: HandshakeMessage) -> Result<HandshakeAction, HandshakeError> {
-        match &self.state {
+        use std::mem;
+    
+        let state = mem::replace(&mut self.state, ServerState::Complete);
+    
+        match state {
             ServerState::AwaitClientHello => match msg {
-                HandshakeMessage::ClientHello(ch) => self.on_client_hello(ch).await,
+                HandshakeMessage::ClientHello(ch) => {
+                    // Delegate; on_client_hello will set the next state explicitly
+                    self.on_client_hello(ch).await
+                }
                 other => Err(HandshakeError::UnexpectedMessage {
                     expected: 0x01,
                     got: msg_type(&other),
                 }),
             },
-            ServerState::AwaitClientFinish { client_id_pk, client_hello_bytes, server_hello_full_bytes, .. } => match msg {
+    
+            ServerState::AwaitClientFinish {
+                client_eph_pk,
+                client_random,
+                server_eph,
+                server_random,
+                client_id_pk,
+                client_hello_bytes,
+                server_hello_full_bytes,
+            } => match msg {
                 HandshakeMessage::ClientFinish(cf) => {
-                    let t2 = transcript::client_signing_transcript(client_hello_bytes, server_hello_full_bytes);
-            
+                    // --- verify client signature ---
+                    let t2 = transcript::client_signing_transcript(
+                        &client_hello_bytes,
+                        &server_hello_full_bytes,
+                    );
+    
                     let h2 = self
                         .crypto
                         .blake2b_32(None, &t2)
                         .await
                         .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
-            
-                        self.crypto
-                            .ed25519_verify(&client_id_pk.0, &h2.0, &proto_sig_to_crypto(cf.client_sig))
-                            .await
-                            .map_err(|_| HandshakeError::BadSignature)?;
-            
-                    // Authentication proven.
-                    // todo: Replace this with real KDF + EstablishedSession.
+    
+                    self.crypto
+                        .ed25519_verify(
+                            &client_id_pk.0,
+                            &h2.0,
+                            &proto_sig_to_crypto(cf.client_sig),
+                        )
+                        .await
+                        .map_err(|_| HandshakeError::BadSignature)?;
+    
+                    // --- derive session keys ---
+                    let shared = self
+                        .crypto
+                        .x25519_shared_secret(&server_eph.secret, &client_eph_pk.0)
+                        .await
+                        .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+    
+                    let keys = crate::handshake::kdf::derive_session_keys(
+                        self.crypto.as_ref(),
+                        &shared,
+                        &client_random,
+                        &server_random,
+                    )
+                    .await?;
+    
+                    // --- now we can safely set final state ---
                     self.state = ServerState::Complete;
-            
-                    // Return a deterministic failure to indicate "auth complete, KDF not implemented".
-                    Err(HandshakeError::Protocol("client authenticated; session keys not derived yet".into()))
+    
+                    Ok(HandshakeAction::Established(crate::handshake::EstablishedSession {
+                        peer_identity: client_id_pk,
+                        keys,
+                    }))
                 }
-                other => Err(HandshakeError::UnexpectedMessage {
-                    expected: 0x03,
-                    got: msg_type(&other),
-                }),
+    
+                other => {
+                    // Restore state before returning error
+                    self.state = ServerState::AwaitClientFinish {
+                        client_eph_pk,
+                        client_random,
+                        server_eph,
+                        server_random,
+                        client_id_pk,
+                        client_hello_bytes,
+                        server_hello_full_bytes,
+                    };
+    
+                    Err(HandshakeError::UnexpectedMessage {
+                        expected: 0x03,
+                        got: msg_type(&other),
+                    })
+                }
             },
-            
+    
             ServerState::Complete => Err(HandshakeError::AlreadyComplete),
         }
     }
+    
 }
 
 impl ServerHandshake {

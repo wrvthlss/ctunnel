@@ -68,24 +68,44 @@ async fn happy_path_signatures_verify() {
 
     // client -> server: ClientHello
     let ch = client.start().await.unwrap().unwrap();
-    let sh_action = server.on_message(ch).await.unwrap();
 
     // server -> client: ServerHello
+    let sh_action = server.on_message(ch).await.unwrap();
     let sh_msg = match sh_action {
         crate::handshake::HandshakeAction::Send(m) => m,
         other => panic!("expected Send(ServerHello), got {other:?}"),
     };
 
-    // client verifies server sig and sends ClientFinish
+    // client verifies server + derives keys + sends ClientFinish
     let cf_action = client.on_message(sh_msg).await.unwrap();
-    let cf_msg = match cf_action {
-        crate::handshake::HandshakeAction::Send(m) => m,
-        other => panic!("expected Send(ClientFinish), got {other:?}"),
+
+    // client side must now be established
+    let (cf_msg, client_session) = match cf_action {
+        crate::handshake::HandshakeAction::SendAndEstablished { msg, session } => (msg, session),
+        other => panic!("expected SendAndEstablished(ClientFinish), got {other:?}"),
     };
 
-    // server verifies client sig (will end with Protocol("...not derived yet") in Step 3)
-    let err = server.on_message(cf_msg).await.unwrap_err();
-    assert!(format!("{err}").contains("session keys not derived yet"));
+    // server verifies client + derives keys
+    let server_action = server.on_message(cf_msg).await.unwrap();
+    let server_session = match server_action {
+        crate::handshake::HandshakeAction::Established(s) => s,
+        other => panic!("expected Established, got {other:?}"),
+    };
+
+    // Prove both sides derived the same material
+    assert_eq!(client_session.keys.key_c2s.0, server_session.keys.key_c2s.0);
+    assert_eq!(client_session.keys.key_s2c.0, server_session.keys.key_s2c.0);
+    assert_eq!(client_session.keys.np_c2s.0, server_session.keys.np_c2s.0);
+    assert_eq!(client_session.keys.np_s2c.0, server_session.keys.np_s2c.0);
+
+    // Directionality sanity check
+    assert_ne!(
+        client_session.keys.key_c2s.0,
+        client_session.keys.key_s2c.0,
+        "directional keys must not be identical"
+    );
+
+    
 }
 
 #[tokio::test]

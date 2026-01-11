@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::{
     crypto::{CryptoProvider, Ed25519Keypair, X25519Keypair},
-    handshake::{ClientPolicy, HandshakeAction, HandshakeError, HandshakeMachine, transcript, proto_sig_to_crypto, crypto_sig_to_proto},
+    handshake::{ClientPolicy, HandshakeAction, HandshakeError, HandshakeMachine, transcript, proto_sig_to_crypto, crypto_sig_to_proto, kdf, EstablishedSession},
     protocol::{ClientHello, Ed25519PublicKey, HandshakeMessage, Random32, X25519PublicKey, PROTOCOL_VERSION_V1, ClientFinish, Signature64},
 };
 
@@ -98,7 +98,7 @@ impl HandshakeMachine for ClientHandshake {
 
     async fn on_message(&mut self, msg: HandshakeMessage) -> Result<HandshakeAction, HandshakeError> {
         match (&self.state, msg) {
-            (ClientState::AwaitServerHello { client_hello_bytes, .. }, HandshakeMessage::ServerHello(sh)) => {
+            (ClientState::AwaitServerHello { client_eph, client_random, client_hello_bytes, .. }, HandshakeMessage::ServerHello(sh)) => {
                 // Verify server identity pin
                 if sh.server_id_pk != self.policy.expected_server {
                     return Err(HandshakeError::BadServerIdentity);
@@ -138,10 +138,26 @@ impl HandshakeMachine for ClientHandshake {
         
                 let finish = ClientFinish { client_sig: crypto_sig_to_proto(sig) };
 
+                let shared = self
+                    .crypto
+                    .x25519_shared_secret(&client_eph.secret, &sh.server_eph_pk.0)
+                    .await
+                    .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+            
+                let keys = kdf::derive_session_keys(self.crypto.as_ref(), &shared, client_random, &sh.server_random).await?;
+                
+                let session = EstablishedSession {
+                    peer_identity: sh.server_id_pk,
+                    keys,
+                }; 
+
                 // Transition to complete (client is done after sending finish)
                 self.state = ClientState::Complete;
-        
-                Ok(HandshakeAction::Send(HandshakeMessage::ClientFinish(finish)))
+
+                Ok(HandshakeAction::SendAndEstablished {
+                    msg: HandshakeMessage::ClientFinish(finish),
+                    session,
+                })
             }
             (ClientState::AwaitServerHello { .. }, other) => Err(HandshakeError::UnexpectedMessage {
                 expected: 0x02,
