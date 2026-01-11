@@ -4,6 +4,10 @@ pub mod types;
 pub use traits::*;
 pub use types::*;
 
+pub mod aead;
+pub use aead::*;
+
+
 #[derive(Debug, thiserror::Error)]
 pub enum ChannelError {
     #[error("not established")]
@@ -18,3 +22,6 @@ pub enum ChannelError {
     #[error("invalid frame")]
     InvalidFrame,
 }
+
+#[cfg(test)]
+mod phase4_tests;
