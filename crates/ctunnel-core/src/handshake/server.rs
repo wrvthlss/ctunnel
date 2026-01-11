@@ -1,10 +1,10 @@
 use std::sync::Arc;
-
 use async_trait::async_trait;
+
 
 use crate::{
     crypto::{CryptoProvider, Ed25519Keypair, X25519Keypair},
-    handshake::{HandshakeAction, HandshakeError, HandshakeMachine, ServerPolicy},
+    handshake::{HandshakeAction, HandshakeError, HandshakeMachine, ServerPolicy, transcript, proto_sig_to_crypto, crypto_sig_to_proto},
     protocol::{
         ClientHello, Ed25519PublicKey, HandshakeMessage, Random32, ServerHello, Signature64, X25519PublicKey,
         PROTOCOL_VERSION_V1,
@@ -20,6 +20,8 @@ pub enum ServerState {
         client_random: Random32,
         server_eph: X25519Keypair,
         server_random: Random32,
+        client_hello_bytes: Vec<u8>,
+        server_hello_full_bytes: Vec<u8>,
     },
     Complete,
 }
@@ -70,13 +72,34 @@ impl HandshakeMachine for ServerHandshake {
                     got: msg_type(&other),
                 }),
             },
-            ServerState::AwaitClientFinish { .. } => match msg {
-                HandshakeMessage::ClientFinish(_) => Err(HandshakeError::Failed), // Step 2 not implemented
+            ServerState::AwaitClientFinish { client_id_pk, client_hello_bytes, server_hello_full_bytes, .. } => match msg {
+                HandshakeMessage::ClientFinish(cf) => {
+                    let t2 = transcript::client_signing_transcript(client_hello_bytes, server_hello_full_bytes);
+            
+                    let h2 = self
+                        .crypto
+                        .blake2b_32(None, &t2)
+                        .await
+                        .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+            
+                        self.crypto
+                            .ed25519_verify(&client_id_pk.0, &h2.0, &proto_sig_to_crypto(cf.client_sig))
+                            .await
+                            .map_err(|_| HandshakeError::BadSignature)?;
+            
+                    // Authentication proven.
+                    // todo: Replace this with real KDF + EstablishedSession.
+                    self.state = ServerState::Complete;
+            
+                    // Return a deterministic failure to indicate "auth complete, KDF not implemented".
+                    Err(HandshakeError::Protocol("client authenticated; session keys not derived yet".into()))
+                }
                 other => Err(HandshakeError::UnexpectedMessage {
                     expected: 0x03,
                     got: msg_type(&other),
                 }),
             },
+            
             ServerState::Complete => Err(HandshakeError::AlreadyComplete),
         }
     }
@@ -107,25 +130,50 @@ impl ServerHandshake {
         // Step 2: signature not implemented yet -> placeholder zeros.
         let server_sig = Signature64([0u8; 64]);
 
-        let sh = ServerHello {
+        let mut sh = ServerHello {
             version: PROTOCOL_VERSION_V1,
             flags: self.flags,
             server_id_pk: Ed25519PublicKey(self.server_id.public),
             server_eph_pk: X25519PublicKey(server_eph.public),
             server_random,
-            server_sig,
+            server_sig: Signature64([0u8; 64]),
         };
+        
+        // Canonical bytes
+        let client_hello_bytes = transcript::client_hello_bytes(&ch);
+        let sh_wo_sig_bytes = transcript::server_hello_wo_sig_bytes(&sh);
 
-        // Transition
+        // Hash transcript and sign
+        let t1 = transcript::server_signing_transcript(&client_hello_bytes, &sh_wo_sig_bytes);
+        let h = self
+            .crypto
+            .blake2b_32(None, &t1)
+            .await
+            .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+
+        let sig = self
+            .crypto
+            .ed25519_sign(&self.server_id, &h.0)
+            .await
+            .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+
+        sh.server_sig = crypto_sig_to_proto(sig);
+        
+        // Compute full ServerHello bytes for client transcript + server verification later
+        let server_hello_full_bytes = transcript::server_hello_full_bytes(&sh);
+
         self.state = ServerState::AwaitClientFinish {
             client_id_pk: ch.client_id_pk,
+            client_hello_bytes,
+            server_hello_full_bytes,
             client_eph_pk: ch.client_eph_pk,
             client_random: ch.client_random,
             server_eph,
             server_random,
         };
-
+        
         Ok(HandshakeAction::Send(HandshakeMessage::ServerHello(sh)))
+        
     }
 }
 

@@ -6,6 +6,8 @@ pub mod client;
 pub mod server;
 pub mod kdf;
 pub mod transcript;
+pub mod convert;
+
 
 pub use traits::*;
 pub use types::*;
@@ -13,6 +15,9 @@ pub use types::*;
 pub use policy::*;
 pub use client::*;
 pub use server::*;
+pub use convert::*;
+
+
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Eq)]
 pub enum HandshakeError {
@@ -46,3 +51,12 @@ mod phase3_scaffold_tests;
 
 #[cfg(test)]
 mod phase3_step2_tests;
+
+#[cfg(test)]
+mod phase3_step3_tests;
+
+#[cfg(test)]
+mod test_crypto;
+
+#[cfg(test)]
+pub(crate) use test_crypto::MockCrypto;

@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::{
     crypto::{CryptoProvider, Ed25519Keypair, X25519Keypair},
-    handshake::{ClientPolicy, HandshakeAction, HandshakeError, HandshakeMachine},
-    protocol::{ClientHello, Ed25519PublicKey, HandshakeMessage, Random32, X25519PublicKey, PROTOCOL_VERSION_V1},
+    handshake::{ClientPolicy, HandshakeAction, HandshakeError, HandshakeMachine, transcript, proto_sig_to_crypto, crypto_sig_to_proto},
+    protocol::{ClientHello, Ed25519PublicKey, HandshakeMessage, Random32, X25519PublicKey, PROTOCOL_VERSION_V1, ClientFinish, Signature64},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +15,7 @@ pub enum ClientState {
         client_eph: X25519Keypair,
         client_random: Random32,
         client_id_pk: Ed25519PublicKey,
+        client_hello_bytes: Vec<u8>,
     },
     Complete,
 }
@@ -80,11 +81,13 @@ impl HandshakeMachine for ClientHandshake {
                     client_random,
                 };
 
-                // Transition state
+                let client_hello_bytes = transcript::client_hello_bytes(&hello);
+
                 self.state = ClientState::AwaitServerHello {
                     client_eph,
                     client_random,
                     client_id_pk,
+                    client_hello_bytes,
                 };
 
                 Ok(Some(HandshakeMessage::ClientHello(hello)))
@@ -94,19 +97,58 @@ impl HandshakeMachine for ClientHandshake {
     }
 
     async fn on_message(&mut self, msg: HandshakeMessage) -> Result<HandshakeAction, HandshakeError> {
-        match &self.state {
-            ClientState::AwaitServerHello { .. } => {
-                // Keep state shape stable and enforce message ordering.
-                match msg {
-                    HandshakeMessage::ServerHello(_) => Err(HandshakeError::Failed),
-                    other => Err(HandshakeError::UnexpectedMessage {
-                        expected: 0x02,
-                        got: msg_type(&other),
-                    }),
+        match (&self.state, msg) {
+            (ClientState::AwaitServerHello { client_hello_bytes, .. }, HandshakeMessage::ServerHello(sh)) => {
+                // Verify server identity pin
+                if sh.server_id_pk != self.policy.expected_server {
+                    return Err(HandshakeError::BadServerIdentity);
                 }
+        
+                // Verify server signature over t1 = H(ch || sh_wo_sig)
+                let sh_wo_sig_bytes = transcript::server_hello_wo_sig_bytes(&sh);
+                let t1 = transcript::server_signing_transcript(client_hello_bytes, &sh_wo_sig_bytes);
+        
+                let h1 = self
+                    .crypto
+                    .blake2b_32(None, &t1)
+                    .await
+                    .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+
+
+                self.crypto
+                    .ed25519_verify(&sh.server_id_pk.0, &h1.0, &proto_sig_to_crypto(sh.server_sig))
+                    .await
+                    .map_err(|_| HandshakeError::BadSignature)?;
+                    
+                // Client signs t2 = H(ch || sh_full)
+                let sh_full_bytes = transcript::server_hello_full_bytes(&sh);
+                let t2 = transcript::client_signing_transcript(client_hello_bytes, &sh_full_bytes);
+        
+                let h2 = self
+                    .crypto
+                    .blake2b_32(None, &t2)
+                    .await
+                    .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+        
+                let sig = self
+                    .crypto
+                    .ed25519_sign(&self.client_id, &h2.0)
+                    .await
+                    .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+        
+                let finish = ClientFinish { client_sig: crypto_sig_to_proto(sig) };
+
+                // Transition to complete (client is done after sending finish)
+                self.state = ClientState::Complete;
+        
+                Ok(HandshakeAction::Send(HandshakeMessage::ClientFinish(finish)))
             }
-            ClientState::Init => Err(HandshakeError::Protocol("client not started".into())),
-            ClientState::Complete => Err(HandshakeError::AlreadyComplete),
+            (ClientState::AwaitServerHello { .. }, other) => Err(HandshakeError::UnexpectedMessage {
+                expected: 0x02,
+                got: msg_type(&other),
+            }),
+            (ClientState::Init, _) => Err(HandshakeError::Protocol("client not started".into())),
+            (ClientState::Complete, _) => Err(HandshakeError::AlreadyComplete),
         }
     }
 }
