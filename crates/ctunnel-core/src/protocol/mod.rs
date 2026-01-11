@@ -19,3 +19,6 @@ pub enum ProtocolError {
     #[error("size limit exceeded")]
     SizeLimit,
 }
+
+#[cfg(test)]
+mod codec_tests;

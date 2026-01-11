@@ -25,3 +25,6 @@ pub enum ChannelError {
 
 #[cfg(test)]
 mod phase4_tests;
+
+#[cfg(test)]
+mod codec_tests;

@@ -1,0 +1,10 @@
+[package]
+name = "ctunnel"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+ctunnel-core = { path = "../../crates/ctunnel-core" }
+ctunnel-net-tokio = { path = "../../crates/ctunnel-net-tokio" }
+tokio = { version = "1", features = ["rt", "macros"] }
