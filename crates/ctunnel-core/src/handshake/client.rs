@@ -1,27 +1,42 @@
+use std::sync::Arc;
+
+use async_trait::async_trait;
+
 use crate::{
+    crypto::{CryptoProvider, Ed25519Keypair, X25519Keypair},
     handshake::{ClientPolicy, HandshakeAction, HandshakeError, HandshakeMachine},
-    protocol::{HandshakeMessage, MSG_SERVER_HELLO},
+    protocol::{ClientHello, Ed25519PublicKey, HandshakeMessage, Random32, X25519PublicKey, PROTOCOL_VERSION_V1},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientState {
-    Init, 
-    AwaitServerHello,
+    Init,
+    AwaitServerHello {
+        client_eph: X25519Keypair,
+        client_random: Random32,
+        client_id_pk: Ed25519PublicKey,
+    },
     Complete,
 }
 
-// Client handshake machine.
+/// Client handshake machine.
 #[derive(Debug)]
 pub struct ClientHandshake {
     state: ClientState,
     policy: ClientPolicy,
+    crypto: Arc<dyn CryptoProvider>,
+    client_id: Ed25519Keypair,
+    flags: u8,
 }
 
 impl ClientHandshake {
-    pub fn new(policy: ClientPolicy) -> Self {
+    pub fn new(policy: ClientPolicy, crypto: Arc<dyn CryptoProvider>, client_id: Ed25519Keypair) -> Self {
         Self {
             state: ClientState::Init,
-            policy
+            policy,
+            crypto,
+            client_id,
+            flags: 0,
         }
     }
 
@@ -34,31 +49,62 @@ impl ClientHandshake {
     }
 }
 
+#[async_trait]
 impl HandshakeMachine for ClientHandshake {
-    // Start handshake process.
-    fn start(&mut self) -> Result<Option<HandshakeMessage>, HandshakeError> {
+    async fn start(&mut self) -> Result<Option<HandshakeMessage>, HandshakeError> {
         match self.state {
             ClientState::Init => {
-                self.state = ClientState::AwaitServerHello;
-                Ok(None)
+                // Generate ephemeral X25519 keypair
+                let client_eph = self
+                    .crypto
+                    .x25519_generate()
+                    .await
+                    .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+
+                // Generate client_random (32 bytes)
+                let mut rnd = [0u8; 32];
+                self.crypto
+                    .random_bytes(&mut rnd)
+                    .await
+                    .map_err(|e| HandshakeError::Crypto(format!("{e}")))?;
+                let client_random = Random32(rnd);
+
+                let client_id_pk = Ed25519PublicKey(self.client_id.public);
+
+                // Build ClientHello
+                let hello = ClientHello {
+                    version: PROTOCOL_VERSION_V1,
+                    flags: self.flags,
+                    client_id_pk,
+                    client_eph_pk: X25519PublicKey(client_eph.public),
+                    client_random,
+                };
+
+                // Transition state
+                self.state = ClientState::AwaitServerHello {
+                    client_eph,
+                    client_random,
+                    client_id_pk,
+                };
+
+                Ok(Some(HandshakeMessage::ClientHello(hello)))
             }
-            // Wait for the Server Hellow, mark this state as complete.
-            ClientState::AwaitServerHello | ClientState::Complete => Err(HandshakeError::AlreadyComplete),
+            ClientState::AwaitServerHello { .. } | ClientState::Complete => Err(HandshakeError::AlreadyComplete),
         }
     }
 
-    // Get message back from server.
-    fn on_message(&mut self, msg: HandshakeMessage) -> Result<HandshakeAction, HandshakeError> {
-        match self.state {
-            // Waiting for hello from server.
-            ClientState::AwaitServerHello => match msg {
-                // Error.
-                HandshakeMessage::ServerHello(_) => Err(HandshakeError::Failed), // implement later
-                _ => Err(HandshakeError::UnexpectedMessage {
-                    expected: MSG_SERVER_HELLO,
-                    got: msg_type(&msg),
-                }),
-            },
+    async fn on_message(&mut self, msg: HandshakeMessage) -> Result<HandshakeAction, HandshakeError> {
+        match &self.state {
+            ClientState::AwaitServerHello { .. } => {
+                // Keep state shape stable and enforce message ordering.
+                match msg {
+                    HandshakeMessage::ServerHello(_) => Err(HandshakeError::Failed),
+                    other => Err(HandshakeError::UnexpectedMessage {
+                        expected: 0x02,
+                        got: msg_type(&other),
+                    }),
+                }
+            }
             ClientState::Init => Err(HandshakeError::Protocol("client not started".into())),
             ClientState::Complete => Err(HandshakeError::AlreadyComplete),
         }

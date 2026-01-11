@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use async_trait::async_trait;
 
 use crate::crypto::{
@@ -8,7 +10,7 @@ use crate::crypto::{
 // Core protocol logic must depend on this trait, never on concrete crypto backends.
 // NOTE: async methods are used for maximal backend flexibility (HSMs, remote KMS, etc.).
 #[async_trait]
-pub trait CryptoProvider: Send + Sync + 'static {
+pub trait CryptoProvider: Send + Sync + Debug + 'static {
     async fn random_bytes(&self, out: &mut [u8]) -> Result<(), CryptoError>;
 
     async fn ed25519_generate(&self) -> Result<Ed25519Keypair, CryptoError>;

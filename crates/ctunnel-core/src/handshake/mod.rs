@@ -43,3 +43,6 @@ pub enum HandshakeError {
 
 #[cfg(test)]
 mod phase3_scaffold_tests;
+
+#[cfg(test)]
+mod phase3_step2_tests;

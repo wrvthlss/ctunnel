@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use crate::{
     handshake::{EstablishedSession, HandshakeError},
     protocol::HandshakeMessage,
@@ -18,10 +20,11 @@ pub enum HandshakeAction {
 
 // Low-level handshake state machine.
 // This is transport-agnostic: it consumes decoded handshake messages and emits actions.
-pub trait HandshakeMachine {
+#[async_trait]
+pub trait HandshakeMachine: Send {
     // Called once at the beginning to produce an initial message (client sends hello).
-    fn start(&mut self) -> Result<Option<HandshakeMessage>, HandshakeError>;
+    async fn start(&mut self) -> Result<Option<HandshakeMessage>, HandshakeError>;
 
     // Feed the next inbound handshake message.
-    fn on_message(&mut self, msg: HandshakeMessage) -> Result<HandshakeAction, HandshakeError>;
+    async fn on_message(&mut self, msg: HandshakeMessage) -> Result<HandshakeAction, HandshakeError>;
 }
