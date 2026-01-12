@@ -134,6 +134,7 @@ dependencies = [
  "async-trait",
  "ctunnel-core",
  "ctunnel-crypto-sodium",
+ "thiserror",
  "tokio",
 ]
 

@@ -9,3 +9,4 @@ ctunnel-core = { path = "../ctunnel-core" }
 ctunnel-crypto-sodium = { path = "../ctunnel-crypto-sodium" }
 tokio = { version = "1", features = ["net", "io-util", "rt", "macros"] }
 async-trait = "0.1"
+thiserror = "2"
