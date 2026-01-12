@@ -7,4 +7,8 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 ctunnel-core = { path = "../../crates/ctunnel-core" }
 ctunnel-net-tokio = { path = "../../crates/ctunnel-net-tokio" }
-tokio = { version = "1", features = ["rt", "macros"] }
+ctunnel-crypto-sodium = { path = "../../crates/ctunnel-crypto-sodium" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+anyhow = "1"
