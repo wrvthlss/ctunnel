@@ -1,6 +1,8 @@
-[package]
-name = "ctunnel"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
+[workspace]
+members = [
+    "crates/ctunnel-core",
+    "crates/ctunnel-crypto-sodium",
+    "crates/ctunnel-net-tokio",
+    "apps/ctunnel",
+]
+resolver = "2"
