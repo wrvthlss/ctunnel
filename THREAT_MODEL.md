@@ -3,13 +3,12 @@ The `tools` directory contains a number of attacks scripts that may be ran again
 
 ## Threat: Handshake Replay
 
-**Scripts**
+**Script(s)**
 - `mitm_proxy_record.py`
 - `replay_handshake.py`
 
 **Outputs**
 - `handshake_capture.json`
-
 
 ### Attacker Capability
 - Observe and record full handshake messages
@@ -34,3 +33,31 @@ The `tools` directory contains a number of attacks scripts that may be ran again
 - Transcript-bound signatures
 - Fresh server randomness and ephemeral keys per handshake
 - Strict state machine validation
+
+## Threat: Handshake Tampering
+
+**Script(s)**
+- `mitm_proxy_tamper.py`
+
+### Attacker Capability
+- Observe and modify handshake messages in transit
+- Preserve framing and message structure
+- Flip individual bits in handshake payloads
+
+**Attack**
+- Modify one byte in `ServerHello.server_sig` while forwarding traffic
+
+**Expected Outcome**
+- Client must reject the handshake
+- No secure session established
+- No application data exchanged
+
+**Observed Outcome**
+- Client aborts handshake  with `signature_verification` failed
+- Server receives `EOF` and terminates connection
+- No channel keys derived
+
+**Mitigation**
+- Transcript bound Ed25519 signature
+- Strict verification before key derivation
+- Explicit state machine enforcing authentication-first design
