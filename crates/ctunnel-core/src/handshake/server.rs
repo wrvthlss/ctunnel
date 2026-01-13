@@ -158,7 +158,6 @@ impl HandshakeMachine for ServerHandshake {
             ServerState::Complete => Err(HandshakeError::AlreadyComplete),
         }
     }
-    
 }
 
 impl ServerHandshake {
