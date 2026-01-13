@@ -27,11 +27,11 @@ enum Command {
         #[arg(long)]
         bind: String,
 
-        /// Server Ed25519 secret key file (64 bytes hex / 128 hex chars)
+        // Server Ed25519 secret key file (64 bytes hex / 128 hex chars)
         #[arg(long)]
         server_key: PathBuf,
 
-        /// Allowed client public key file (32 bytes hex / 64 hex chars). Can be repeated.
+        // Allowed client public key file (32 bytes hex / 64 hex chars). Can be repeated.
         #[arg(long)]
         allow_client: Vec<PathBuf>,
     },
