@@ -2,6 +2,15 @@
 The `tools` directory contains a number of attacks scripts that may be ran against the protocol for security proof and testing. This document contains information pertaining to each attack script.
 
 ## Threat: Handshake Replay
+
+**Scripts**
+- `mitm_proxy_record.py`
+- `replay_handshake.py`
+
+**Outputs**
+- `handshake_capture.json`
+
+
 ### Attacker Capability
 - Observe and record full handshake messages
 - Replay messages byte-for-byte in a new TCP connection
