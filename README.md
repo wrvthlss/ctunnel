@@ -58,6 +58,17 @@ ctunnel provides the following guarantees:
 
 All of these properties are empirically tested using on-path attacker scripts.
 
+## Threat Model Assumptions
+ctunnel assumes:
+- An active on-path attacker capable of replay and tampering
+- No compromise of long-term private keys
+- Both peers are provisioned out-of-band
+
+ctunnel does not attmept to defend against:
+- Endpoint compromise
+- Traffic analysis
+- Denial of service at the transport layer
+
 See `THREAT_MODEL.md` for concrete attack demonstrations.
 
 ### Repository Layout
