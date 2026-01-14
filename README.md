@@ -17,7 +17,7 @@ It is a ground-up implementation designed to be:
 - Easy to audit
 - Easy to reuse in other systems
 
-## Why ctunnel exists
+## Design Goals and Constraints
 
 Most secure transports fall into one of two extremes:
 - **Very complex (TLS)**: powerful, but hard to reason about or adapt
