@@ -89,3 +89,54 @@ The `tools` directory contains a number of attack scripts that may be ran agains
 - Explicit server-side allowlist
 - Identity treated as authorization input
 - Strict state machine preventing handshake continuation
+
+## Threat: Record-layer replay within an established session
+
+**Script(s)**
+- `mitm_proxy_recordlayer_attack.py`
+
+### Attacker capability
+- Observe encrypted application frames
+- Replay captured frames byte-for-byte
+
+**Attack**
+- Duplicate an encrypted DATA frame with the same counter
+
+**Expected outcome**
+- Receiver must reject the replayed frame
+
+**Observed outcome**
+- First frame accepted
+- Replayed frame rejected with ReplayDetected
+- Connection terminated
+
+**Mitigation**
+- Strict monotonic counter tracking per direction
+- Replay detection enforced before decryption
+
+## Threat: Record-layer ciphertext tampering
+
+**Attack**
+- Duplicate an encrypted DATA frame with the same counter
+
+### Attacker capability
+- Observe and modify encrypted application frames
+- Preserve framing, counters, and structure
+- Flip individual bits in ciphertext or AAD fields
+
+**Attack**
+- Modify a single ciphertext byte in an encrypted DATA frame
+
+**Expected outcome**
+- Receiver must reject the frame
+- No plaintext delivered
+
+**Observed outcome**
+- AEAD verification failed
+- Channel aborted with DecryptFailed
+- Connection closed
+
+**Mitigation**
+- AEAD (XChaCha20-Poly1305)
+- AAD binding of (frame_type, counter)
+- Fail-closed behavior on authentication fail

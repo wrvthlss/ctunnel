@@ -72,6 +72,37 @@ def tamper_client_hello_client_pk(frame: bytes) -> bytes:
     payload[pk_off] ^= 0x01
     return hdr + bytes(payload)
 
+def tamper_client_hello_random(frame: bytes) -> bytes:
+    """
+    ClientHello payload:
+      [type=0x01][version u16][flags u8]
+      [client_id_pk 32]           offset 4..36
+      [client_eph_pk 32]          offset 36..68
+      [client_random 32]          offset 68..100
+    Flip one bit in client_random[0] => payload[68].
+    """
+    hdr = frame[:4]
+    payload = bytearray(parse_payload(frame))
+    if len(payload) != 100 or payload_type(payload) != 0x01:
+        return frame
+
+    rnd_off = 68
+    payload[rnd_off] ^= 0x01
+    return hdr + bytes(payload)
+
+def tamper_client_hello_eph(frame: bytes) -> bytes:
+    """
+    Flip one bit in client_eph_pk[0] => payload[36].
+    """
+    hdr = frame[:4]
+    payload = bytearray(parse_payload(frame))
+    if len(payload) != 100 or payload_type(payload) != 0x01:
+        return frame
+
+    eph_off = 36
+    payload[eph_off] ^= 0x01
+    return hdr + bytes(payload)
+
 def forward(src: socket.socket, dst: socket.socket, direction: str, mode: str, stop_evt: threading.Event):
     try:
         while not stop_evt.is_set():
@@ -79,7 +110,7 @@ def forward(src: socket.socket, dst: socket.socket, direction: str, mode: str, s
             payload = parse_payload(frame)
             t = payload_type(payload)
 
-            # Only tamper server->client ServerHello if mode set
+            # Tamper direction
             if direction == "s2c" and mode == "tamper_serverhello_sig" and t == 0x02:
                 print("[tamper] modifying ServerHello signature byte")
                 frame = tamper_server_hello_sig(frame)
@@ -87,6 +118,14 @@ def forward(src: socket.socket, dst: socket.socket, direction: str, mode: str, s
             if direction == "c2s" and mode == "tamper_clienthello_clientpk" and t == 0x01:
                 print("[tamper] modifying ClientHello client_id_pk byte")
                 frame = tamper_client_hello_client_pk(frame)
+
+            if direction == "c2s" and mode == "tamper_clienthello_random" and t == 0x01:
+                print("[tamper] modifying ClientHello client_random byte")
+                frame = tamper_client_hello_random(frame)
+
+            if direction == "c2s" and mode == "tamper_clienthello_eph" and t == 0x01:
+                print("[tamper] modifying ClientHello client_eph_pk byte")
+                frame = tamper_client_hello_eph(frame)
 
             dst.sendall(frame)
     except (EOFError, ConnectionResetError, BrokenPipeError):
@@ -108,7 +147,18 @@ def main():
     ap.add_argument("--listen-port", type=int, required=True, help="Proxy listen port (client connects here)")
     ap.add_argument("--upstream-host", default="127.0.0.1")
     ap.add_argument("--upstream-port", type=int, required=True, help="Upstream server port")
-    ap.add_argument("--mode", choices=["tamper_serverhello_sig", "tamper_clienthello_clientpk"], default="tamper_serverhello_sig")
+
+    ap.add_argument(
+    "--mode",
+    choices=[
+        "tamper_serverhello_sig",
+        "tamper_clienthello_clientpk",
+        "tamper_clienthello_random",
+        "tamper_clienthello_eph",
+    ],
+        default="tamper_serverhello_sig",
+    )
+
     args = ap.parse_args()
 
     ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
