@@ -39,7 +39,7 @@ def tamper_server_hello_sig(frame: bytes) -> bytes:
     Total payload len: 164
     Signature offset in payload: 1+2+1+32+32+32 = 100
     So signature bytes are payload[100:164]
-    We'll flip one bit in payload[100].
+    Flip one bit in payload[100].
     """
     hdr = frame[:4]
     payload = bytearray(parse_payload(frame))
@@ -49,6 +49,27 @@ def tamper_server_hello_sig(frame: bytes) -> bytes:
 
     sig_off = 100
     payload[sig_off] ^= 0x01  # flip 1 bit
+    return hdr + bytes(payload)
+
+def tamper_client_hello_client_pk(frame: bytes) -> bytes:
+    """
+    ClientHello wire payload layout:
+      [type=0x01][version u16][flags u8]
+      [client_id_pk 32]
+      [client_eph_pk 32]
+      [client_random 32]
+    Total payload len: 100
+    client_id_pk offset in payload: 1+2+1 = 4
+    Flip one bit in payload[4] (first byte of client_id_pk).
+    """
+    hdr = frame[:4]
+    payload = bytearray(parse_payload(frame))
+
+    if len(payload) != 100 or payload_type(payload) != 0x01:
+        return frame
+
+    pk_off = 4
+    payload[pk_off] ^= 0x01
     return hdr + bytes(payload)
 
 def forward(src: socket.socket, dst: socket.socket, direction: str, mode: str, stop_evt: threading.Event):
@@ -62,6 +83,10 @@ def forward(src: socket.socket, dst: socket.socket, direction: str, mode: str, s
             if direction == "s2c" and mode == "tamper_serverhello_sig" and t == 0x02:
                 print("[tamper] modifying ServerHello signature byte")
                 frame = tamper_server_hello_sig(frame)
+
+            if direction == "c2s" and mode == "tamper_clienthello_clientpk" and t == 0x01:
+                print("[tamper] modifying ClientHello client_id_pk byte")
+                frame = tamper_client_hello_client_pk(frame)
 
             dst.sendall(frame)
     except (EOFError, ConnectionResetError, BrokenPipeError):
@@ -83,7 +108,7 @@ def main():
     ap.add_argument("--listen-port", type=int, required=True, help="Proxy listen port (client connects here)")
     ap.add_argument("--upstream-host", default="127.0.0.1")
     ap.add_argument("--upstream-port", type=int, required=True, help="Upstream server port")
-    ap.add_argument("--mode", choices=["tamper_serverhello_sig"], default="tamper_serverhello_sig")
+    ap.add_argument("--mode", choices=["tamper_serverhello_sig", "tamper_clienthello_clientpk"], default="tamper_serverhello_sig")
     args = ap.parse_args()
 
     ls = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
