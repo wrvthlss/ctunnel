@@ -162,7 +162,7 @@ Generate demo keys if not already present
 cargo run -p ctunnel -- keygen --out-dir keys --name server
 cargo run -p ctunnel -- keygen --out-dir keys --name client
 ```
-### Handshake-Level Attacks
+## Handshake-Level Attacks
 
 Handshake attacks target authentication, integrity, and replay resistance during session establishment.
 
