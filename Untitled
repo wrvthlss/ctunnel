@@ -1,0 +1,21 @@
+Summary
+
+ctunnel is intentionally small, explicit, and defensive.
+
+Every layer:
+
+has a single responsibility
+
+enforces its own invariants
+
+exposes failures early and clearly
+
+The result is a secure transport that is:
+
+understandable
+
+auditable
+
+reusable
+
+resilient under active attack
