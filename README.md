@@ -1,6 +1,6 @@
 # ctunnel (working name)
 
-ctunnel is a small, auditable, zero-trust secure transport implemented in Rust.
+ctunnel is a small, auditable, zero-trust secure transport built in Rust. It provides mutually authenticated, forward-secret connections with replay-protected encrypted messaging, and is designed around explicit threat modeling, strict failure semantics, and clean separation between protocol logic, cryptography, and I/O.
 
 It provides:
 - Mutual authentication (Ed25519)
