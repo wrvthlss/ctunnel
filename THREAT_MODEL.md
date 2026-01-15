@@ -192,7 +192,7 @@ python3 tools/mitm_proxy_record.py \
   --upstream-port 9000 \
   --out tools/handshake_capture.json
 ```
-Run a normal client through the proxy.
+Run a normal client through the proxy:
 ```
 cargo run -p ctunnel -- client \
   --connect 127.0.0.1:9001 \
