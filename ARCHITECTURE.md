@@ -1,174 +1,246 @@
 # Architecture
-### Purpose
-ctunnel is a control-plane tunneling library designed to establish authenticated, encrypted, replay-resistant channels between mutually distrustful peers over untrusted networks.
+### Overview
+`ctunnel` is a layered secure transport designed around explicit trust boundaries, auditable cryptography, and protocol correctness.
 
-**The Project is Intentionally**
-- library-first
-- low-level
-- explicit trust boundaries
+The system is intentionally decomposed into small, orthogonal layers so that:
 
-Binaries, demos and deployment artifacts are adapters layered on top of the core.
+- Security properties are localized and testable
+- Cryptographic assumptions are explicit
+- Failures are isolated and fail-closed
+- Components can be reused independently
 
-## Architectural Principles
-This project follows these non-negotiable principles:
+This document describes how the system is structured, why each layer exists, and how they compose into a complete secure connection.
 
-**Separation of concerns**
+## High Level Architecture
+```
+┌─────────────────────────────────────────────┐
+│                Application                  │
+│        (CLI demo / future consumers)        │
+└──────────────────────┬──────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────┐
+│          Network Adapter (Tokio)            │
+│         ctunnel-net-tokio                   │
+│                                             │
+│  - TCP sockets                              │
+│  - Length-prefixed framing                  │
+│  - Handshake orchestration                  │
+│  - SecureConn abstraction                   │
+└──────────────────────┬──────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────┐
+│              Protocol Core                  │
+│               ctunnel-core                  │
+│                                             │
+│  ┌─────────────┐   ┌─────────────────────┐  │
+│  │ Handshake   │   │ Secure Channel      │  │
+│  │ State Mach. │   │ (AEAD record layer) │  │
+│  └─────────────┘   └─────────────────────┘  │
+│                                             │
+│  - Transcript binding                       │
+│  - Policy enforcement                       │
+│  - Replay detection                         │
+└──────────────────────┬──────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────┐
+│           Crypto Provider (Trait)           │
+│                                             │
+│  - Ed25519                                  │
+│  - X25519                                   │
+│  - XChaCha20-Poly1305                       │
+│  - BLAKE2b                                  │
+└──────────────────────┬──────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────┐
+│     libsodium-backed implementation         │
+│        ctunnel-crypto-sodium                │
+│                                             │
+│  - Single unsafe boundary                   │
+│  - Auditable FFI                            │
+└─────────────────────────────────────────────┘
+```
+### Design goals
+The architecture is driven by the following goals:
+1. **Zero implicit trust**
+    - Every identity is explicit
+    - Every message is authenticated
+    - No “best effort” parsing or recovery
 
-Framing, protocol, crypto, handshake, and channel logic are isolated.
+2. **Explicit threat boundaries**
+    - Network is assumed hostile
+    - On-path attackers are expected
+    - Replay and tampering are first-class concerns
+3. **Auditability over abstraction**
+    - Prefer simple, explicit code to opaque frameworks
+    - Cryptographic operations are visible and testable
+    - Unsafe code is isolated
+4. **Composable layers**
+    - Handshake can exist without networking
+    - Secure channel can exist without TCP
+    - Crypto backend can be swapped
 
-**Dependency Inversion**
+## Layer 1: Framing
+**Responsibility**
+- Convert a byte stream into discrete messages
 
-Core logic depends on traits, not implementation.
+**Implementation**
+- Length-prefixed framing: `[u32 length][payload]`
 
-**Explicit State Machines**
+**Why it exists**
+- Prevents message boundary ambiguity
+- Enables strict size validation
+- Separates transport concerns from protocol logic
 
-Protocol phases are encoded in types and transitions.
+**Security properties**
+- Oversized frames rejected
+- Truncated frames rejected
+- `EOF` handled explicitly
 
-**Minimal Unsafe Surface**
+**Out of scope**
+- Encryption
+- Authentication
+- Message semantics
 
-Unsafe code is confined to crypto backend implementations.
+## Layer 2: Handshake protocol
+**Responsibility**
+- Establish a mutually authenticated, forward-secret session
+- Derive shared session keys
+- Enforce identity policy
 
-**Extensibility without Refactor**
+**Handshake Flow**
+```
+ClientHello  ─────────▶
+               ServerHello (signed)
+             ◀─────────
+ClientFinish (signed) ─▶
+```
+**Key properties**
+- Mutual authentication (Ed25519)
+- Forward secrecy (ephemeral X25519)
+- Transcript-bound signatures
+- Strict state machines
 
-New features must be addable via composition, not rewrites.
+**Why transcript binding matters**
 
-*If a change violates these principles, the design must change before the code.*
+All handshake signatures are computed over:
+```
+H(ClientHello || ServerHello)
+```
+This ensures
+- Replayed messages fail
+- Reordered messages fail
+- Tampered messages fail
+- Mismatched randomness fails
 
-### High-Level System View
-The core has no knowledge of:
+**Failure Semants**
+- Any verification failures abort immediately
+- No partial session state is retained
+- No fallback paths exist
 
-- CLI arguments
-- Filesystem layouts
-- Docker
-- Environment variables
-- Deployment topology
+## Layer 3: Secure channel (record layer)
 
-### Core Subsystems
-**Framing**
+**Responsibility**
+- Confidentiality and integrity of application data
+- Replay protection for encrypted frames
 
-Responsibility:
+**Implementation**
+- AEAD: XChaCha20-Poly1305
+- Directional keys (client→server / server→client)
+- Nonce = `prefix || counter`
+- AAD = `(frame_type || counter)`
 
-- Convert an ordered byte stream into discrete, bounded frames.
+**Replay defense**
+- Monotonic counters per direction
+- Any `counter <= last_seen` is rejected
 
-Non-responsibilities:
-- No encryption
-- No protocol semantics
-- No handshake logic
+**Why this design**
+- Simple and auditable
+- Strong nonce-misuse resistance
+- Clear separation between framing and cryptography
 
-Design notes:
-- Length-prefixed binary framing
-- Enforced size limits
-- Transport-agnostic (operates over async I/O traits)
+## Layer 4: Crypto provider abstraction
 
----
+**Responsibility**
+- Provide cryptographic primitives without embedding policy
 
-**Protocol Types**
+**Why a trait**
+- Decouples protocol logic from implementation
+- Enables mocking and deterministic testing
+- Allows alternative backends (HSM, RustCrypto, etc.)
 
-Responsibility:
+**Provided primitives**
+- Ed25519 sign/verify
+- X25519 key exchange
+- AEAD encrypt/decrypt
+- BLAKE2b hashing
+- Secure randomness
 
-- Define exact byte-level layouts for protocol messages.
+### libsodium integration
 
-Non-responsibilities:
-- No network I/O
-- No cryptography
-- No state tracking
+The libsodium backend is intentionally isolated in its own crate.
 
-Design notes:
-- Strict validation on decode
-- Deterministic encoding
-- No serde / text formats
-
----
-
-**Crypto Provider (Inversion Boundary)**
-
-Responsibility:
-
-- Provide cryptographic primitives via a trait interface.
-
-Non-responsibilities:
+**Properties**
+- Single unsafe boundary
+- Thin, explicit FFI
 - No protocol logic
-- No key storage policy
-- No network interaction
+- No networking logic
 
-Design notes:
-- Core depends on `CryptoProvider` trait only
-- `libsodium` implementation lives outside core logic
-- Unsafe code is restricted to backend crates/modules
+**Why libsodium**
+- Well-audited
+- Conservative defaults
+- Widely deployed
 
----
+### Network adapter (Tokio)
 
-**Handshake State Machine**
+**Responsibility**
+- Bind protocol to real TCP sockets
+- Orchestrate handshake message exchange
+- Switch to secure channel post-handshake
 
-Responsibility:
-- Drive authentication and session establishment.
+**Key abstraction**
+```
+SecureConn
+```
+This represents an established secure connection with encrypted `send()`/`recv()`. The adapter contains no cryptographic decisions; it only wires layers together.
 
-Non-responsibilities:
-- No socket management
-- No framing
-- No persistent storage
+### Failure philosophy
 
-Design notes:
-- Deterministic state transitions
-- **Input:** protocol messages
-- **Output:** actions (send message, establish session, fail)
+ctunnel follows a fail-closed model:
+- Any malformed input aborts
+- Any authentication failure aborts
+- Any replay aborts
+- Any decryption failure aborts
 
----
+This is intentional. Recovering from cryptographic or protocol errors is a security risk, not a feature.
 
-**Secure Channel**
+## What is explicitly out of scope currently
 
-Responsibility:
-- Provide an authenticated, encrypted record layer once a session is established.
+ctunnel does not attempt to solve:
+- Public PKI / certificates
+- Browser compatibility
+- Algorithm negotiation
+- Transport-layer DoS
+- Traffic analysis resistance
+- Endpoint compromise
 
-Non-responsibilities:
-- No handshake
-- No framing
-- No transport concerns
+Some of these features are planned for implementation.
 
-Design notes:
-- Counter-based replay protection
-- Directional keys
-- Explicit close semantics
+## Reuse and extensibility
 
----
+Because layers are isolated, ctunnel-core can be embedded into other transports.The secure channel can be reused independently and the handshake can be extended with:
+- Additional authentication steps
+- Role assertions
+- Key rotation
 
-**Error Model**
+Future work can add features without weakening existing guarantees.
 
-Errors are typed, layered, and explicit.
+## Summary
 
-Each subsystem defines its own error type:
-- `FramingError`
-- `ProtocolError`
-- `CryptoError`
-- `HandshakeError`
-- `ChannelError`
+ctunnel is intentionally small, explicit, and defensive.
 
-A top-level `CtunnelError` aggregates them without erasing meaning. Errors represent security-relevant failure modes, not generic strings.
+Every layer:
+- Has a single responsibility
+- Enforces its own invariants
+- Exposes failures early and clearly
 
----
-
-**Extensibility Strategy**
-
-The system is designed to allow:
-- New crypto backends (RustCrypto, HSMs, PQ)
-- Alternative transports (QUIC, Unix sockets)
-- Additional protocol versions
-- Policy engines (authorization, rate limits)
-- Multiplexed channels
-
-All extensions must:
-- Implement existing traits
-- Avoid modifying core invariants
-- Preserve backward compatibility where possible
-
----
-
-**Unsafe Code Policy**
-
-- Unsafe code is forbidden in core protocol logic.
-- Unsafe code is permitted only in crypto backend implementations.
-
-All unsafe blocks must be:
-- Minimal
-- Documented
-- Justified
+The result is a secure transport that is, understandable, auditable, reusable, and resilient under active attack
