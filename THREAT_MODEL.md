@@ -184,6 +184,7 @@ cargo run -p ctunnel -- server \
 ```
 
 **Step 2: Record a valid handshake**
+
 Start the MITM recording proxy:
 ```
 python3 tools/mitm_proxy_record.py \
