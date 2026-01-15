@@ -1,5 +1,5 @@
 # Threat Models
-The `tools` directory contains a number of attack scripts that may be ran against the protocol for security proof and testing. This document contains information pertaining to each attack script.
+The `tools/` directory contains a number of attack scripts that may be ran against the protocol for security proof and testing. This document contains information pertaining to each attack script.
 
 ## Threat: Handshake Replay
 
