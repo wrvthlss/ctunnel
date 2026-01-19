@@ -1,11 +1,11 @@
 [package]
-name = "ctunnel"
+name = "anchor-demo"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-anchor = { path = "../../crates/anchor" }
+anchor = { git = "https://github.com/wrvthlss/anchor" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 clap = { version = "4", features = ["derive"] }
 hex = "0.4"

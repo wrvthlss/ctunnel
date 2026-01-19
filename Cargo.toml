@@ -1,9 +1,5 @@
 [workspace]
 members = [
-    "crates/ctunnel-core",
-    "crates/ctunnel-crypto-sodium",
-    "crates/ctunnel-net-tokio",
-    "crates/anchor",
-    "apps/ctunnel",
+    "apps/anchor-demo",
 ]
 resolver = "2"

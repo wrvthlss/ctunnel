@@ -23,12 +23,57 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "anchor"
 version = "0.1.0"
+source = "git+https://github.com/wrvthlss/anchor#64d40f6dbf48104c7521c74ea083bfe7f8d4e9fe"
 dependencies = [
+ "anchor-core",
+ "anchor-crypto-sodium",
+ "anchor-net-tokio",
  "anyhow",
- "ctunnel-core",
- "ctunnel-crypto-sodium",
- "ctunnel-net-tokio",
  "hex",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "anchor-core"
+version = "0.1.0"
+source = "git+https://github.com/wrvthlss/anchor#64d40f6dbf48104c7521c74ea083bfe7f8d4e9fe"
+dependencies = [
+ "async-trait",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "anchor-crypto-sodium"
+version = "0.1.0"
+source = "git+https://github.com/wrvthlss/anchor#64d40f6dbf48104c7521c74ea083bfe7f8d4e9fe"
+dependencies = [
+ "anchor-core",
+ "async-trait",
+ "libsodium-sys-stable",
+ "once_cell",
+]
+
+[[package]]
+name = "anchor-demo"
+version = "0.1.0"
+dependencies = [
+ "anchor",
+ "anyhow",
+ "clap",
+ "hex",
+ "tokio",
+]
+
+[[package]]
+name = "anchor-net-tokio"
+version = "0.1.0"
+source = "git+https://github.com/wrvthlss/anchor#64d40f6dbf48104c7521c74ea083bfe7f8d4e9fe"
+dependencies = [
+ "anchor-core",
+ "anchor-crypto-sodium",
+ "async-trait",
  "thiserror",
  "tokio",
 ]
@@ -211,48 +256,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "ctunnel"
-version = "0.1.0"
-dependencies = [
- "anchor",
- "anyhow",
- "clap",
- "hex",
- "tokio",
-]
-
-[[package]]
-name = "ctunnel-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "ctunnel-crypto-sodium"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ctunnel-core",
- "libsodium-sys-stable",
- "once_cell",
- "tokio",
-]
-
-[[package]]
-name = "ctunnel-net-tokio"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ctunnel-core",
- "ctunnel-crypto-sodium",
- "thiserror",
- "tokio",
 ]
 
 [[package]]
