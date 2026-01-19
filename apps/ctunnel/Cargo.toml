@@ -5,9 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-ctunnel-core = { path = "../../crates/ctunnel-core" }
-ctunnel-net-tokio = { path = "../../crates/ctunnel-net-tokio" }
-ctunnel-crypto-sodium = { path = "../../crates/ctunnel-crypto-sodium" }
+anchor = { path = "../../crates/anchor" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 clap = { version = "4", features = ["derive"] }
 hex = "0.4"

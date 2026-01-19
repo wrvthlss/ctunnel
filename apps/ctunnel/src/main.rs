@@ -3,14 +3,8 @@ use std::{collections::HashSet, fs, path::PathBuf, sync::Arc};
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
 
-use ctunnel_core::{
-    crypto::Ed25519Keypair,
-    crypto::CryptoProvider,
-    handshake::ServerPolicy,
-    protocol::Ed25519PublicKey,
-};
-use ctunnel_crypto_sodium::SodiumCryptoProvider;
-use ctunnel_net_tokio::{accept_tcp, connect_tcp};
+use anchor::{AnchorConn, AnchorListener, Identity, PublicKey, TrustPolicy};
+
 
 #[derive(Parser)]
 #[command(name = "ctunnel", version, about = "ctunnel CLI demo (Phase 5)")]
@@ -88,42 +82,60 @@ async fn main() -> Result<()> {
     }
 }
 
+fn read_pubkey(path: &PathBuf) -> Result<[u8; 32]> {
+    let s = std::fs::read_to_string(path)?;
+    let bytes = hex::decode(s.trim())?;
+    if bytes.len() != 32 {
+        return Err(anyhow!("invalid public key length in {}", path.display()));
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}
+
 async fn run_server(bind: String, server_key: PathBuf, allow_client: Vec<PathBuf>) -> Result<()> {
     if allow_client.is_empty() {
-        return Err(anyhow!("--allow-client is required at least once"));
+        return Err(anyhow!("--allow-client must be provided at least once"));
     }
 
-    let crypto = Arc::new(SodiumCryptoProvider::new());
-
-    let server_id = load_ed25519_keypair(&server_key)?;
-    let server_pk = Ed25519PublicKey(server_id.public);
+    let identity = Identity::from_files(
+        &server_key,
+        server_key.with_extension("pub"),
+    )?;
 
     let mut allowed = HashSet::new();
     for p in allow_client {
-        let pk = load_pubkey32(&p)?;
-        allowed.insert(Ed25519PublicKey(pk));
+        let pk_bytes = read_pubkey(&p)?;
+        allowed.insert(PublicKey(pk_bytes));
     }
-    let policy = ServerPolicy::new(allowed);
 
-    let listener = tokio::net::TcpListener::bind(&bind)
-        .await
-        .with_context(|| format!("failed to bind {bind}"))?;
+    let listener = anchor::listen(
+        &bind,
+        identity,
+        TrustPolicy::AllowList(allowed),
+    )
+    .await?;
 
-    eprintln!("ctunnel server listening on {bind}");
-    eprintln!("server public key: {}", hex::encode(server_pk.0));
+    println!("ANCHOR server listening on {}", bind);
+    println!(
+        "server public key: {}",
+        hex::encode(listener.local_addr()?.ip().to_string())
+    );
 
-    let (mut conn, peer) = accept_tcp(&listener, crypto, server_id, policy).await?;
-    eprintln!("accepted secure connection from client pk={}", hex::encode(peer.0));
+    let mut conn = listener.accept().await?;
+    println!(
+        "accepted secure connection from client pk={}",
+        hex::encode(conn.peer_identity().0)
+    );
 
-    // Simple echo loop (end when client disconnects/errors)
     loop {
-        match conn.recv_data().await {
+        match conn.recv().await {
             Ok(msg) => {
-                eprintln!("recv {} bytes", msg.len());
-                conn.send_data(&msg).await?;
+                println!("recv {} bytes", msg.len());
+                conn.send(&msg).await?;
             }
             Err(e) => {
-                eprintln!("connection ended: {e}");
+                println!("connection ended: {e}");
                 break;
             }
         }
@@ -132,50 +144,53 @@ async fn run_server(bind: String, server_key: PathBuf, allow_client: Vec<PathBuf
     Ok(())
 }
 
-async fn run_client(connect: String, client_key: PathBuf, expect_server: PathBuf, msg: String) -> Result<()> {
-    let crypto = Arc::new(SodiumCryptoProvider::new());
+async fn run_client(
+    connect: String,
+    client_key: PathBuf,
+    expect_server: PathBuf,
+    msg: String,
+) -> Result<()> {
+    let identity = Identity::from_files(
+        &client_key,
+        client_key.with_extension("pub"),
+    )?;
 
-    let client_id = load_ed25519_keypair(&client_key)?;
-    let expected_server_pk = Ed25519PublicKey(load_pubkey32(&expect_server)?);
+    let server_pk = read_pubkey(&expect_server)?;
 
-    let mut conn = connect_tcp(&connect, crypto, client_id, expected_server_pk).await?;
+    let mut conn = anchor::connect(
+        &connect,
+        identity,
+        TrustPolicy::Pinned(PublicKey(server_pk)),
+    )
+    .await?;
 
-    conn.send_data(msg.as_bytes()).await?;
-    let echo = conn.recv_data().await?;
+    conn.send(msg.as_bytes()).await?;
+    let echo = conn.recv().await?;
+
     println!("{}", String::from_utf8_lossy(&echo));
-
     Ok(())
 }
 
 async fn run_keygen(out_dir: PathBuf, name: String, force: bool) -> Result<()> {
-    let crypto = SodiumCryptoProvider::new();
+    let id = Identity::generate().await?;
 
-    let kp = crypto.ed25519_generate().await?;
-
-    fs::create_dir_all(&out_dir)
-        .with_context(|| format!("failed to create {}", out_dir.display()))?;
+    std::fs::create_dir_all(&out_dir)?;
 
     let key_path = out_dir.join(format!("{name}.key"));
     let pub_path = out_dir.join(format!("{name}.pub"));
 
-    if !force {
-        if key_path.exists() || pub_path.exists() {
-            return Err(anyhow!(
-                "key files already exist (use --force to overwrite)"
-            ));
-        }
+    if !force && (key_path.exists() || pub_path.exists()) {
+        return Err(anyhow!("key files already exist (use --force to overwrite)"));
     }
 
-    fs::write(&key_path, hex::encode(kp.secret))
-        .with_context(|| format!("failed to write {}", key_path.display()))?;
-    fs::write(&pub_path, hex::encode(kp.public))
-        .with_context(|| format!("failed to write {}", pub_path.display()))?;
+    std::fs::write(&key_path, hex::encode(id.secret_key))?;
+    std::fs::write(&pub_path, hex::encode(id.public_key.0))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600))?;
-        fs::set_permissions(&pub_path, fs::Permissions::from_mode(0o644))?;
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::set_permissions(&pub_path, std::fs::Permissions::from_mode(0o644))?;
     }
 
     println!("generated:");
@@ -200,26 +215,4 @@ fn load_hex_bytes(path: &PathBuf, expected_len: usize) -> Result<Vec<u8>> {
         ));
     }
     Ok(bytes)
-}
-
-fn load_ed25519_keypair(path: &PathBuf) -> Result<Ed25519Keypair> {
-    let sk = load_hex_bytes(path, 64)?;
-    let mut secret = [0u8; 64];
-    secret.copy_from_slice(&sk);
-
-    // Public key must be loaded from the .pub file explicitly
-    let pub_path = path.with_extension("pub");
-    let pk = load_pubkey32(&pub_path)?;
-
-    Ok(Ed25519Keypair {
-        public: pk,
-        secret,
-    })
-}
-
-fn load_pubkey32(path: &PathBuf) -> Result<[u8; 32]> {
-    let pk = load_hex_bytes(path, 32)?;
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&pk);
-    Ok(out)
 }
